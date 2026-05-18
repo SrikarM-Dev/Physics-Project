@@ -73,12 +73,12 @@ class Bird:
         # Pipe collision (circle to rectangle)
         for pipe in pipes:
             # Check if bird's x-range overlaps with pipe's x-range
-            if self.x + self.radius > pipe['x'] and self.x - self.radius < pipe['x'] + PIPE_WIDTH:
+            if self.x + self.radius > pipe.x and self.x - self.radius < pipe.x + PIPE_WIDTH:
                 # Check collision with top pipe
-                if self.y - self.radius < pipe['top_height']:
+                if self.y - self.radius < pipe.top_height:
                     return True
                 # Check collision with bottom pipe
-                if self.y + self.radius > pipe['bottom_y']:
+                if self.y + self.radius > pipe.bottom_y:
                     return True
         
         return False
