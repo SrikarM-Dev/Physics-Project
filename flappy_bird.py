@@ -13,7 +13,7 @@ FPS = 60
 # Physics Constants
 GRAVITY = 0.6
 FLAP_STRENGTH = -12
-PIPE_GAP = 120
+PIPE_GAP = 300
 PIPE_WIDTH = 60
 PIPE_SPEED = 4
 BIRD_RADIUS = 15
@@ -52,26 +52,38 @@ clock = pygame.time.Clock()
 font = pygame.font.Font(None, 36)
 large_font = pygame.font.Font(None, 72)
 small_font = pygame.font.Font(None, 24)
-title_font = pygame.font.Font(None, 90)  # REDUCED from 120
-huge_title_font = pygame.font.Font(None, 75)  # REDUCED from 90
+title_font = pygame.font.Font(None, 90)
+huge_title_font = pygame.font.Font(None, 75)
 button_font = pygame.font.Font(None, 32)
 tiny_font = pygame.font.Font(None, 18)
 
 # Physics tips for loading screen
 PHYSICS_TIPS = [
-    "Gravity: 0.6 px/frame²",
-    "Flap Power: -12 px/frame",
-    "Pipe Gap: 120 pixels",
-    "Collision Detection: Enabled",
-    "Frame Rate: 60 FPS",
-    "Kinematics: y = y₀ + v*t + ½at²",
+    "Gravity: 10 m/s² downward",
+    "Kinematics: y = yi + v*t + ½at²",
     "Momentum: Mass × Velocity",
     "Energy: Potential + Kinetic",
+    "Kinetic Energy: ½mv²",
+    "Potential Energy: mgh",
+    "Impulse: Force × Time",
+    "Work: Force × Distance",
+    "Power: Work / Time",
+    "Newton's 2nd Law: F = ma",
+    "Weight: Force due to Gravity",
+    "Acceleration: Change in Velocity",
+    "Velocity: Change in Position",
+    "Newton's 1st Law: Objects in motion stay in motion",
+    "Elastic Collision: Momentum & Energy Conserved",
+    "Inelastic Collision: Momentum Conserved",
+    "Centripetal Force: mv²/r",
+    "Friction: Opposes Motion",
+    "Terminal Velocity: Max speed under gravity",
+    "Escape Velocity: Speed to escape gravity",
 ]
 
 class AnimatedBird:
     """Bird with wings and animation"""
-    def __init__(self, x, y):
+    def __init__(self, x, y, weight=1.0):
         self.x = x
         self.y = y
         self.radius = BIRD_RADIUS
@@ -80,21 +92,22 @@ class AnimatedBird:
         self.wing_angle = 0
         self.wing_flap_speed = 0.15
         self.eye_blink = 0
-    
+        self.weight = weight
+
     def update(self):
         """Update bird physics"""
         self.velocity += GRAVITY
         self.y += self.velocity
         self.wing_angle += self.wing_flap_speed
-    
+
     def animate_idle(self):
         """Gentle idle animation for menu"""
         self.wing_angle += 0.08
         self.y += math.sin(self.wing_angle * 0.5) * 0.3
-    
+
     def flap(self):
-        """Apply upward impulse"""
-        self.velocity = FLAP_STRENGTH
+        """Apply upward impulse - affected by weight"""
+        self.velocity = FLAP_STRENGTH / self.weight
     
     def draw(self, surface, animated=False):
         """Draw detailed bird with wings and eye"""
@@ -160,12 +173,12 @@ class AnimatedBird:
 
 class Pipe:
     """Pipe obstacle"""
-    def __init__(self, x):
+    def __init__(self, x, gap=PIPE_GAP):
         self.x = x
         min_height = 50
-        max_height = SCREEN_HEIGHT - PIPE_GAP - 50
+        max_height = SCREEN_HEIGHT - gap - 40
         self.top_height = random.uniform(min_height, max_height)
-        self.bottom_y = self.top_height + PIPE_GAP
+        self.bottom_y = self.top_height + gap
         self.passed = False
     
     def update(self):
@@ -214,7 +227,7 @@ class Game:
         self.game_running = True
         self.frame_count = 0
         self.menu_frame_count = 0  # Track frames for menu animations
-        
+
         # Game State
         self.state = STATE_MAIN_MENU
         self.input_method = None
@@ -224,13 +237,19 @@ class Game:
         self.game_over_tip = ""  # Random tip displayed on game over
         self.music_enabled = True
         self.brightness = 100  # 0-100
+        self.bird_weight = 1.5  # Bird weight for physics (1.0 = normal, higher = harder)
         self.dragging_slider = False
+        self.dragging_weight_slider = False
         
         # Audio system
         self.music_loaded = False
+        self.collision_sound = None
         try:
-            pygame.mixer.init()
+            pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=512)
             if pygame.mixer.get_init():
+                # Generate collision sound first
+                self.collision_sound = self.generate_collision_sound()
+
                 try:
                     pygame.mixer.music.load("background_music.mp3")
                     pygame.mixer.music.set_volume(0.5)
@@ -247,7 +266,7 @@ class Game:
         self.play_button = Button(100, 300, 200, 50, "PLAY", (25, 100, 200))
         self.credits_button = Button(100, 380, 200, 50, "CREDITS", (200, 100, 25))
         self.settings_button = Button(100, 460, 200, 50, "SETTINGS", (100, 100, 100))
-        self.back_button = Button(20, 20, 80, 40, "← BACK", (100, 100, 100))
+        self.back_button = Button(20, 20, 80, 40, "BACK", (100, 100, 100))
         self.play_again_button = Button(50, 450, 150, 50, "PLAY AGAIN", (0, 150, 0))
         self.exit_menu_button = Button(220, 450, 150, 50, "EXIT TO MENU", (200, 50, 50))
         
@@ -261,7 +280,46 @@ class Game:
         
         # Pipes
         self.pipes.append(Pipe(SCREEN_WIDTH))
-    
+
+    def generate_collision_sound(self):
+        """Generate a retro game over sound (descending pitch)"""
+        try:
+            sample_rate = 22050
+            duration = 0.6  # 600ms 
+            frames = int(sample_rate * duration)
+
+            # Generate descending pitch (classic game over sound)
+            samples = []
+            start_freq = 800
+            end_freq = 200
+
+            for i in range(frames):
+                # Linear frequency
+                progress = i / frames
+                current_freq = start_freq - (start_freq - end_freq) * progress
+
+                angle = 2 * math.pi * current_freq * i / sample_rate
+                # Add amplitude envelope (fade out)
+                envelope = (1 - progress) * 0.5
+                sample = int(32767 * envelope * math.sin(angle))
+                # Store as 16-bit
+                samples.extend([sample & 0xFF, (sample >> 8) & 0xFF])
+
+            # Create pygame sound
+            sound = pygame.mixer.Sound(buffer=bytes(samples))
+            return sound
+        except Exception as e:
+            return None
+
+    def play_collision_sound(self):
+        """Play collision sound effect"""
+        try:
+            if self.collision_sound and pygame.mixer.get_init():
+                self.collision_sound.set_volume(0.7)
+                self.collision_sound.play()
+        except Exception:
+            pass
+
     def handle_events(self):
         """Handle user input"""
         mouse_pos = pygame.mouse.get_pos()
@@ -286,7 +344,13 @@ class Game:
                         self.state = STATE_MAIN_MENU
                     elif self.state == STATE_GAME_OVER:
                         self.reset()
-                
+
+                # Z key to skip loading screen
+                if event.key == pygame.K_z and self.state == STATE_LOADING:
+                    self.state = STATE_PLAYING
+                    self.loading_timer = 0
+                    self.loading_progress = 0
+
                 if self.state == STATE_INPUT_SELECT:
                     if event.key == pygame.K_1:
                         self.input_method = INPUT_CLICK
@@ -320,10 +384,6 @@ class Game:
                                 pygame.mixer.music.unpause()
                             else:
                                 pygame.mixer.music.pause()
-                    if event.key == pygame.K_LEFT:
-                        self.brightness = max(30, self.brightness - 10)
-                    if event.key == pygame.K_RIGHT:
-                        self.brightness = min(100, self.brightness + 10)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if self.state == STATE_MAIN_MENU:
@@ -367,6 +427,10 @@ class Game:
                         elif hasattr(self, 'slider_rect') and self.slider_rect.collidepoint(mouse_pos):
                             self.dragging_slider = True
                             self.update_brightness_from_mouse(mouse_pos)
+                        # Weight slider
+                        elif hasattr(self, 'weight_slider_rect') and self.weight_slider_rect.collidepoint(mouse_pos):
+                            self.dragging_weight_slider = True
+                            self.update_weight_from_mouse(mouse_pos)
                 
                 elif self.state == STATE_GAME_OVER:
                     if self.play_again_button.is_clicked(mouse_pos):
@@ -378,10 +442,13 @@ class Game:
             
             if event.type == pygame.MOUSEBUTTONUP:
                 self.dragging_slider = False
-            
+                self.dragging_weight_slider = False
+
             if event.type == pygame.MOUSEMOTION:
                 if self.dragging_slider and self.state == STATE_SETTINGS:
                     self.update_brightness_from_mouse(event.pos)
+                if self.dragging_weight_slider and self.state == STATE_SETTINGS:
+                    self.update_weight_from_mouse(event.pos)
         
         return True
     
@@ -392,12 +459,22 @@ class Game:
             slider_width = self.slider_rect.width
             mouse_x = mouse_pos[0]
             self.brightness = int(100 * (mouse_x - slider_x) / slider_width)
-            self.brightness = max(30, min(100, self.brightness))
+            self.brightness = max(0, min(100, self.brightness))
+
+    def update_weight_from_mouse(self, mouse_pos):
+        """Update bird weight based on mouse position (1.0 to 3.0)"""
+        if hasattr(self, 'weight_slider_rect'):
+            slider_x = self.weight_slider_rect.x
+            slider_width = self.weight_slider_rect.width
+            mouse_x = mouse_pos[0]
+            # Weight from 1.0 to 3.0
+            self.bird_weight = 1.0 + (2.0 * (mouse_x - slider_x) / slider_width)
+            self.bird_weight = max(1.0, min(3.0, self.bird_weight))
     
     def start_loading(self):
         """Start the loading state"""
         # Reset bird and pipes for new game
-        self.bird = AnimatedBird(60, 300)
+        self.bird = AnimatedBird(60, 300, weight=self.bird_weight)
         self.pipes = [Pipe(SCREEN_WIDTH)]
         self.score = 0
         self.frame_count = 0
@@ -419,8 +496,8 @@ class Game:
         
         elif self.state == STATE_LOADING:
             self.loading_timer += 1
-            # 5 seconds = 300 frames at 60 FPS
-            self.loading_progress = min(100, (self.loading_timer / 300) * 100)
+            # 8 seconds = 480 frames at 60 FPS
+            self.loading_progress = min(100, (self.loading_timer / 480) * 100)
             if self.loading_progress >= 100:
                 self.state = STATE_PLAYING
                 self.loading_timer = 0
@@ -429,25 +506,31 @@ class Game:
         elif self.state == STATE_PLAYING:
             self.frame_count += 1
             self.bird.update()
-            
+
             for pipe in self.pipes:
                 pipe.update()
                 if not pipe.passed and pipe.x + PIPE_WIDTH < self.bird.x:
                     pipe.passed = True
                     self.score += 1
-            
+
             self.pipes = [p for p in self.pipes if not p.is_offscreen()]
-            
+
             if len(self.pipes) == 0 or self.pipes[-1].x < SCREEN_WIDTH - 200:
-                self.pipes.append(Pipe(SCREEN_WIDTH))
-            
+                self.pipes.append(Pipe(SCREEN_WIDTH, gap=self.get_pipe_gap()))
+
             if self.bird.check_collision(self.pipes):
+                self.play_collision_sound()
                 self.game_over_tip = random.choice(PHYSICS_TIPS)  # Random tip for game over
                 self.state = STATE_GAME_OVER
     
+    def get_pipe_gap(self):
+        """Calculate pipe gap based on score - decreases by 20 every 3 points, minimum 120"""
+        gap = PIPE_GAP - (self.score // 3) * 20
+        return max(120, gap)
+
     def reset(self):
         """Reset game"""
-        self.bird = AnimatedBird(60, 300)
+        self.bird = AnimatedBird(60, 300, weight=self.bird_weight)
         self.pipes = [Pipe(SCREEN_WIDTH)]
         self.score = 0
         self.frame_count = 0
@@ -477,13 +560,7 @@ class Game:
             pygame.draw.line(screen, (20, 140, 20), (x, grass_y), (x + 10, grass_y + grass_height), 2)
     
     def draw_static_pipes(self):
-        """Draw decorative pipes on menu screen"""
-        # Grass is at y = 560, so pipes need to reach there
-        # Left pipe - moved left and extended down to touch grass
-        pygame.draw.rect(screen, GREEN, (10, 220, PIPE_WIDTH, 340))
-        pygame.draw.rect(screen, (26, 107, 26), (10, 220, PIPE_WIDTH, 280), 2)
-        
-        # Right pipe - extended down to touch grass
+        """Draw pipes on menu screen"""
         pygame.draw.rect(screen, GREEN, (SCREEN_WIDTH - 10 - PIPE_WIDTH, 280, PIPE_WIDTH, 280))
         pygame.draw.rect(screen, (26, 107, 26), (SCREEN_WIDTH - 10 - PIPE_WIDTH, 280, PIPE_WIDTH, 280), 2)
     
@@ -496,41 +573,34 @@ class Game:
         # Calculate bob animation for text
         bob_offset = math.sin(self.frame_count * 0.05) * 15
         
-        # Title - YELLOW and bobbing, fits on page
+        # Title - yellow and bobbing
         title = huge_title_font.render("FLAPPY BIRD", True, YELLOW)
-        screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 15 + bob_offset))
+        screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 30 + bob_offset))
         
-        # Subtitle - YELLOW and bobbing
+        # Subtitle - yellow and bobbing
         subtitle = font.render("Physics Project", True, YELLOW)
         screen.blit(subtitle, (SCREEN_WIDTH//2 - subtitle.get_width()//2, 105 + bob_offset))
         
-        # Draw animated bird with mouse tracking to buttons (ONLY VERTICAL MOVEMENT)
         mouse_pos = pygame.mouse.get_pos()
-        
-        # Bird stays at x=60, only moves vertically to button height
-        bird_target_y = 250  # Default position
-        
+        bird_target_y = 250
+
         if self.play_button.rect.collidepoint(mouse_pos):
             bird_target_y = self.play_button.rect.centery
         elif self.credits_button.rect.collidepoint(mouse_pos):
             bird_target_y = self.credits_button.rect.centery
         elif self.settings_button.rect.collidepoint(mouse_pos):
             bird_target_y = self.settings_button.rect.centery
-        
-        # Smoothly move bird towards target Y only
+
         if self.bird.y < bird_target_y - 5:
             self.bird.y += 5
         elif self.bird.y > bird_target_y + 5:
             self.bird.y -= 5
         else:
             self.bird.y = bird_target_y
-        
-        # Keep X fixed at 60
+
         self.bird.x = 60
-        
         self.bird.draw(screen, animated=True)
-        
-        # Buttons
+
         self.play_button.draw(screen)
         self.credits_button.draw(screen)
         self.settings_button.draw(screen)
@@ -539,17 +609,15 @@ class Game:
         """Draw input selection screen"""
         self.draw_background()
         self.draw_grass()
-        
+
         title = font.render("Choose Your Input", True, BLACK)
         screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 40))
-        
+
         subtitle = small_font.render("Press 1, 2, 3, or 4", True, DARK_GRAY)
         screen.blit(subtitle, (SCREEN_WIDTH//2 - subtitle.get_width()//2, 90))
-        
-        # Input method buttons
+
         for i, btn in enumerate(self.input_buttons):
             btn.draw(screen)
-            # Show number hint
             hint_text = tiny_font.render(f"Press {i+1}", True, WHITE)
             hint_rect = hint_text.get_rect(topleft=(btn.rect.x + 10, btn.rect.y + 5))
             screen.blit(hint_text, hint_rect)
@@ -573,46 +641,39 @@ class Game:
         
         progress_text = small_font.render(f"{int(self.loading_progress)}%", True, BLACK)
         screen.blit(progress_text, (SCREEN_WIDTH//2 - progress_text.get_width()//2, bar_y + 30))
-        
-        # Physics tips - Change every 60 frames (1 second), randomized
-        tip_change_interval = 60  # Change tip every 1 second
-        frames_into_loading = self.loading_timer % (tip_change_interval * len(PHYSICS_TIPS))
-        tip_index = (frames_into_loading // tip_change_interval) % len(PHYSICS_TIPS)
-        # Rotate through tips in order, but starting position is randomized
+
+        tip_change_interval = 90
+        tip_index = (self.loading_timer // tip_change_interval) % len(PHYSICS_TIPS)
         actual_tip_index = (self.current_tip + tip_index) % len(PHYSICS_TIPS)
         physics_tip = PHYSICS_TIPS[actual_tip_index]
-        
-        tip_text = font.render(physics_tip, True, BLACK)
+
+        tip_text = small_font.render(physics_tip, True, BLACK)
         screen.blit(tip_text, (SCREEN_WIDTH//2 - tip_text.get_width()//2, 250))
-        
-        # Input method
+
         input_text = f"Input: {self.input_method}"
         input_render = small_font.render(input_text, True, BLACK)
         screen.blit(input_render, (SCREEN_WIDTH//2 - input_render.get_width()//2, 330))
-        
-        # Additional info
+
         info_text = tiny_font.render("Get ready to play!", True, DARK_GRAY)
         screen.blit(info_text, (SCREEN_WIDTH//2 - info_text.get_width()//2, 390))
     
     def draw_playing(self):
         """Draw game playing screen"""
         self.draw_background()
-        
+
         for pipe in self.pipes:
             pipe.draw(screen)
-        
+
         self.draw_grass()
         self.bird.draw(screen)
-        
-        # Score
+
         score_text = font.render(f"Score: {self.score}", True, BLACK)
         score_bg = pygame.Surface((150, 50))
         score_bg.set_alpha(180)
         score_bg.fill(WHITE)
         screen.blit(score_bg, (10, 10))
         screen.blit(score_text, (20, 20))
-        
-        # Input hint
+
         input_text = ""
         if self.input_method == INPUT_CLICK:
             input_text = "Click to flap"
@@ -622,7 +683,7 @@ class Game:
             input_text = "Arrow UP to flap"
         elif self.input_method == INPUT_ALL:
             input_text = "Click/SPACE/Arrow to flap"
-        
+
         hint = small_font.render(input_text, True, BLACK)
         hint_bg = pygame.Surface((hint.get_width() + 10, 30))
         hint_bg.set_alpha(180)
@@ -634,32 +695,30 @@ class Game:
         """Draw game over screen"""
         self.draw_background()
         self.draw_grass()
-        
+
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         overlay.set_alpha(200)
         overlay.fill(BLACK)
         screen.blit(overlay, (0, 0))
-        
+
         game_over_text = large_font.render("Game Over!", True, WHITE)
         final_score_text = font.render(f"Final Score: {self.score}", True, WHITE)
-        
-        screen.blit(game_over_text, (SCREEN_WIDTH//2 - game_over_text.get_width()//2, 100))
-        screen.blit(final_score_text, (SCREEN_WIDTH//2 - final_score_text.get_width()//2, 200))
-        
-        # Display random physics tip in light green
+        weight_text = small_font.render(f"Bird Weight: {self.bird_weight:.1f}x", True, (200, 255, 200))
+
+        screen.blit(game_over_text, (SCREEN_WIDTH//2 - game_over_text.get_width()//2, 80))
+        screen.blit(final_score_text, (SCREEN_WIDTH//2 - final_score_text.get_width()//2, 160))
+        screen.blit(weight_text, (SCREEN_WIDTH//2 - weight_text.get_width()//2, 210))
+
         if self.game_over_tip:
             tip_text = small_font.render(self.game_over_tip, True, (200, 255, 200))
-            screen.blit(tip_text, (SCREEN_WIDTH//2 - tip_text.get_width()//2, 300))
-        
-        # Draw both buttons
+            screen.blit(tip_text, (SCREEN_WIDTH//2 - tip_text.get_width()//2, 270))
+
         self.play_again_button.draw(screen)
-        
-        # Draw EXIT TO MENU with smaller font
+
         exit_color = tuple(min(c + 30, 255) for c in self.exit_menu_button.color) if self.exit_menu_button.hover else self.exit_menu_button.color
         pygame.draw.rect(screen, exit_color, self.exit_menu_button.rect, border_radius=8)
         pygame.draw.rect(screen, WHITE, self.exit_menu_button.rect, 2, border_radius=8)
-        
-        # Use smaller font for EXIT TO MENU
+
         exit_text_render = small_font.render("EXIT TO MENU", True, WHITE)
         exit_text_rect = exit_text_render.get_rect(center=self.exit_menu_button.rect.center)
         screen.blit(exit_text_render, exit_text_rect)
@@ -668,86 +727,99 @@ class Game:
         """Draw settings menu"""
         self.draw_background()
         self.draw_grass()
-        
+
         self.back_button.draw(screen)
-        
+
         title = font.render("Settings", True, BLACK)
-        screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 80))
-        
-        # Music toggle
+        screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 50))
+
         music_status = "ON" if self.music_enabled else "OFF"
         music_text = small_font.render(f"Music: {music_status}", True, BLACK)
-        screen.blit(music_text, (SCREEN_WIDTH//2 - music_text.get_width()//2, 160))
+        screen.blit(music_text, (SCREEN_WIDTH//2 - music_text.get_width()//2, 110))
         music_hint = tiny_font.render("(Click or press M)", True, DARK_GRAY)
-        screen.blit(music_hint, (SCREEN_WIDTH//2 - music_hint.get_width()//2, 185))
-        
-        # Music toggle button
+        screen.blit(music_hint, (SCREEN_WIDTH//2 - music_hint.get_width()//2, 135))
+
         music_button_color = (0, 150, 0) if self.music_enabled else (150, 0, 0)
-        pygame.draw.rect(screen, music_button_color, (120, 215, 160, 40), border_radius=8)
-        pygame.draw.rect(screen, WHITE, (120, 215, 160, 40), 2, border_radius=8)
+        pygame.draw.rect(screen, music_button_color, (120, 165, 160, 40), border_radius=8)
+        pygame.draw.rect(screen, WHITE, (120, 165, 160, 40), 2, border_radius=8)
         music_button_text = small_font.render("Toggle", True, WHITE)
-        music_button_text_rect = music_button_text.get_rect(center=(200, 235))
+        music_button_text_rect = music_button_text.get_rect(center=(200, 185))
         screen.blit(music_button_text, music_button_text_rect)
-        
-        # Brightness label
+
         brightness_text = small_font.render(f"Brightness: {self.brightness}%", True, BLACK)
-        screen.blit(brightness_text, (SCREEN_WIDTH//2 - brightness_text.get_width()//2, 290))
-        
-        # Brightness slider background
+        screen.blit(brightness_text, (SCREEN_WIDTH//2 - brightness_text.get_width()//2, 230))
+
         slider_x = 50
-        slider_y = 340
+        slider_y = 270
         slider_width = 300
         slider_height = 20
-        
+
         pygame.draw.rect(screen, DARK_GRAY, (slider_x, slider_y, slider_width, slider_height), 2)
         pygame.draw.rect(screen, LIGHT_GREEN, (slider_x, slider_y, int(slider_width * self.brightness / 100), slider_height))
-        
-        # Slider knob - LARGER FOR DRAGGING
+
         knob_x = slider_x + int(slider_width * self.brightness / 100)
         pygame.draw.circle(screen, WHITE, (knob_x, slider_y + slider_height // 2), 12)
         pygame.draw.circle(screen, BLACK, (knob_x, slider_y + slider_height // 2), 12, 2)
-        
+
+        weight_text = small_font.render(f"Bird Weight: {self.bird_weight:.1f}x", True, BLACK)
+        screen.blit(weight_text, (SCREEN_WIDTH//2 - weight_text.get_width()//2, 320))
+        weight_hint = tiny_font.render("(Higher = More clicks needed)", True, DARK_GRAY)
+        screen.blit(weight_hint, (SCREEN_WIDTH//2 - weight_hint.get_width()//2, 345))
+
+        weight_slider_x = 50
+        weight_slider_y = 375
+        weight_slider_width = 300
+        weight_slider_height = 20
+
+        pygame.draw.rect(screen, DARK_GRAY, (weight_slider_x, weight_slider_y, weight_slider_width, weight_slider_height), 2)
+        weight_progress = (self.bird_weight - 1.0) / 2.0
+        pygame.draw.rect(screen, (200, 100, 255), (weight_slider_x, weight_slider_y, int(weight_slider_width * weight_progress), weight_slider_height))
+
+        weight_knob_x = weight_slider_x + int(weight_slider_width * weight_progress)
+        pygame.draw.circle(screen, WHITE, (weight_knob_x, weight_slider_y + weight_slider_height // 2), 12)
+        pygame.draw.circle(screen, BLACK, (weight_knob_x, weight_slider_y + weight_slider_height // 2), 12, 2)
+
         # Instructions
         instructions = [
-            "Click and drag slider to adjust brightness",
-            "M - Toggle Music  |  ← → - Adjust (keyboard)",
-            "ESC - Go Back"
+            "Drag sliders to adjust settings",
+            "M - Toggle Music | ESC - Go Back"
         ]
-        
-        y_offset = 420
+
+        y_offset = 440
         for instruction in instructions:
             text = tiny_font.render(instruction, True, DARK_GRAY)
             screen.blit(text, (SCREEN_WIDTH//2 - text.get_width()//2, y_offset))
             y_offset += 25
-        
+
         # Store slider bounds for click detection
         self.slider_rect = pygame.Rect(slider_x - 15, slider_y - 15, slider_width + 30, slider_height + 30)
-        self.music_button_rect = pygame.Rect(120, 215, 160, 40)
+        self.weight_slider_rect = pygame.Rect(weight_slider_x - 15, weight_slider_y - 15, weight_slider_width + 30, weight_slider_height + 30)
+        self.music_button_rect = pygame.Rect(120, 165, 160, 40)
     
     def draw_credits(self):
         """Draw credits"""
         self.draw_background()
         self.draw_grass()
-        
+
         self.back_button.draw(screen)
-        
+
         title = font.render("Credits", True, BLACK)
         screen.blit(title, (SCREEN_WIDTH//2 - title.get_width()//2, 80))
-        
+
         credits = [
             "Flappy Bird Physics Project",
             "",
-            "Created with Python & Pygame",
+            "Created by Srikar Muthyala",
             "",
             "Physics Concepts:",
             "• Constant Acceleration (Gravity)",
             "• Kinematic Equations of Motion",
-            "• Collision Detection",
+            "• Energy Conservation (Kinetic + Potential)",
             "• Impulse and Momentum",
             "",
             "AP Physics C Final Project"
         ]
-        
+
         y_offset = 160
         for line in credits:
             if line.startswith("•"):
@@ -757,10 +829,25 @@ class Game:
                 continue
             else:
                 text = small_font.render(line, True, BLACK)
-            
+
             screen.blit(text, (SCREEN_WIDTH//2 - text.get_width()//2, y_offset))
             y_offset += 28
     
+    def apply_brightness_overlay(self):
+        """Apply brightness overlay to adjust screen brightness"""
+        if self.brightness < 100:
+            # Darken the screen
+            darken_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            darken_surface.set_alpha(int(255 * (1 - self.brightness / 100)))
+            darken_surface.fill(BLACK)
+            screen.blit(darken_surface, (0, 0))
+        elif self.brightness > 100:
+            # Brighten the screen
+            brighten_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            brighten_surface.set_alpha(int(255 * ((self.brightness - 100) / 100)))
+            brighten_surface.fill(WHITE)
+            screen.blit(brighten_surface, (0, 0))
+
     def draw(self):
         """Draw based on current game state"""
         if self.state == STATE_MAIN_MENU:
@@ -777,7 +864,10 @@ class Game:
             self.draw_settings()
         elif self.state == STATE_CREDITS:
             self.draw_credits()
-        
+
+        # Apply brightness overlay last
+        self.apply_brightness_overlay()
+
         pygame.display.flip()
 
 def main():
@@ -794,13 +884,4 @@ def main():
     pygame.quit()
 
 if __name__ == "__main__":
-    print("Flappy Bird - Advanced Physics Project")
-    print("All Features Implemented:")
-    print("  ✓ Draggable brightness slider")
-    print("  ✓ Settings button repositioned below Credits")
-    print("  ✓ All text centered and fit properly")
-    print("  ✓ Play Again loops with same input")
-    print("  ✓ ALL 3 input option (Click + Space + Arrow)")
-    print("  ✓ 5-second loading with physics tips")
-    
     main()

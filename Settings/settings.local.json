@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python flappy_bird.py)",
+      "Bash(pkill -f \"python flappy_bird.py\")",
+      "Bash(python3 flappy_bird.py)",
+      "Bash(pkill -f \"flappy_bird.py\")",
+      "Bash(pip3 install *)",
+      "Bash(cp \"/Users/srikar_muthyala/Downloads/Cigarette_Boat_KLICKAUD.mp3\" \"/Users/srikar_muthyala/Physics-Project/Physics-Project/background_music.mp3\" && ls -lh \"/Users/srikar_muthyala/Physics-Project/Physics-Project/background_music.mp3\")"
+    ]
+  }
+}
